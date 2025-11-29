@@ -1,4 +1,6 @@
-
+__pycache__/
+*.pyc
+processed/gtnode_best.pth
 *.h5ad
 *.h5
 *.csv
