@@ -10,7 +10,7 @@ Return: Training Data Dict
 def prepare_dataset(dataset, temporal_cutoff=11.0):
     # Locate the files: 
     graph_path=f"{dataset}/{dataset}_graph_velocity.pt"
-    adata_path=f"{dataset}/{dataset}_data.h5ad"
+    adata_path=f"{dataset}/{dataset}_data_velocity.h5ad"
 
     # Load graph
     print(f"\nLoading graph from {graph_path}")
@@ -109,7 +109,6 @@ Params: dataset name and data dictionary
 Return: None
 """
 def save_prepared_data(dataset, data):
-    
     output_path = f"{dataset}/{dataset}_prepared.pt"
     torch.save(data, output_path)
     print(f"\n Saved prepared data to {output_path}")
