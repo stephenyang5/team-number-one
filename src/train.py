@@ -37,44 +37,117 @@ def load_graph(graph_path):
     return graph
 
 
-def create_train_val_test_split():
-    # TODO (going to pinch off of angelic)
+def create_train_val_test_split(graph, temporal_cutoff=11.0):
+    """
+    Purpose: Create temporal holdout split for training
+    Params: graph object and temporal_cutoff
+    Return: graph with train_mask, val_mask, test_mask added
+    """
+    # Extract timepoint (handle both numpy and tensor)
+    if hasattr(graph, 'timepoint'):
+        if isinstance(graph.timepoint, np.ndarray):
+            timepoint = torch.from_numpy(graph.timepoint).float()
+        else:
+            timepoint = graph.timepoint.float()
+    else:
+        raise ValueError("Graph missing 'timepoint' attribute")
     
+    print(f"\nTemporal cutoff = E{temporal_cutoff}")
+    
+    # Create temporal split
+    train_mask = timepoint >= temporal_cutoff
+    test_mask = timepoint < temporal_cutoff
+    
+    # Validation: use middle timepoint from training set
+    train_timepoints = timepoint[train_mask].unique()
+    if len(train_timepoints) > 2:
+        val_timepoint = sorted(train_timepoints.tolist())[len(train_timepoints) // 2]
+        val_mask = (timepoint == val_timepoint)
+        train_mask = train_mask & ~val_mask
+    else:
+        val_mask = torch.zeros_like(train_mask, dtype=torch.bool)
+    
+    print(f"\nSplit summary:")
+    print(f"TRAIN (E{temporal_cutoff}+): {train_mask.sum().item():,} cells")
+    if val_mask.sum() > 0:
+        print(f"VAL: {val_mask.sum().item():,} cells")
+    print(f"TEST (E<{temporal_cutoff}): {test_mask.sum().item():,} cells")
+    
+    # Show label distribution in each split
+    if hasattr(graph, 'celltype_names') and graph.celltype_names is not None:
+        print(f"\nLabel distribution:")
+        for split_name, mask in [('TRAIN', train_mask), ('VAL', val_mask), ('TEST', test_mask)]:
+            if mask.sum() > 0:
+                print(f"{split_name}:")
+                for i, name in enumerate(graph.celltype_names):
+                    count = ((graph.celltype == i) & mask).sum().item()
+                    pct = 100 * count / mask.sum().item() if mask.sum() > 0 else 0
+                    print(f"  {name}: {count} ({pct:.1f}%)")
+    
+    # Add masks to graph
+    graph.train_mask = train_mask
+    graph.val_mask = val_mask
+    graph.test_mask = test_mask
+    
+    return graph
 
 
 def train_epoch(model, graph, optimizer, criterion, device):
     model.train()
     optimizer.zero_grad()
     
+    # Convert timepoint_norm to tensor if it's a numpy array
+    timepoint_norm_tensor = None
+    if hasattr(graph, 'timepoint_norm') and graph.timepoint_norm is not None:
+        if isinstance(graph.timepoint_norm, np.ndarray):
+            timepoint_norm_tensor = torch.from_numpy(graph.timepoint_norm).float().to(device)
+        else:
+            timepoint_norm_tensor = graph.timepoint_norm.to(device)
+    
+    # Move graph data to device
+    x = graph.x.to(device)
+    edge_index = graph.edge_index.to(device)
+    edge_attr = graph.edge_attr.to(device) if hasattr(graph, 'edge_attr') and graph.edge_attr is not None else None
+    
     # forward pass
     if hasattr(graph, 'timepoint_norm') and hasattr(graph, 'edge_attr'):
         out = model(
-            graph.x.to(device),
-            graph.edge_index.to(device),
-            edge_attr=graph.edge_attr.to(device) if graph.edge_attr is not None else None,
-            timepoint_norm=graph.timepoint_norm.to(device) if hasattr(graph, 'timepoint_norm') else None,
+            x,
+            edge_index,
+            edge_attr=edge_attr,
+            timepoint_norm=timepoint_norm_tensor,
         )
     elif hasattr(graph, 'timepoint_norm'):
         out = model(
-            graph.x.to(device),
-            graph.edge_index.to(device),
+            x,
+            edge_index,
             edge_attr=None,
-            timepoint_norm=graph.timepoint_norm.to(device),
+            timepoint_norm=timepoint_norm_tensor,
         )
     else:
-        out = model(graph.x.to(device), graph.edge_index.to(device))
+        out = model(x, edge_index)
     
     # compute loss only on training nodes
-    loss = criterion(out[graph.train_mask], graph.celltype[graph.train_mask].to(device))
+    train_mask_device = graph.train_mask.to(device)
+    celltype_device = graph.celltype.to(device)
+    loss = criterion(out[train_mask_device], celltype_device[train_mask_device])
     
     # backward pass
     loss.backward()
     optimizer.step()
     
-    # compute accuracy
-    pred = out[graph.train_mask].argmax(dim=1).cpu()
-    true = graph.celltype[graph.train_mask].cpu()
+    # compute accuracy (move to CPU to free GPU memory)
+    pred = out[train_mask_device].argmax(dim=1).cpu()
+    true = celltype_device[train_mask_device].cpu()
     acc = accuracy_score(true.numpy(), pred.numpy())
+    
+    # Clear cache
+    del x, edge_index, out, train_mask_device, celltype_device
+    if edge_attr is not None:
+        del edge_attr
+    if timepoint_norm_tensor is not None:
+        del timepoint_norm_tensor
+    torch.cuda.empty_cache()
     
     return loss.item(), acc
 
@@ -84,34 +157,65 @@ def evaluate(model, graph, mask, device, celltype_names=None):
     """Evaluate model on a given mask."""
     model.eval()
     
+    # Clear cache before evaluation
+    torch.cuda.empty_cache()
+    
+    # Convert timepoint_norm to tensor if it's a numpy array
+    timepoint_norm_tensor = None
+    if hasattr(graph, 'timepoint_norm') and graph.timepoint_norm is not None:
+        if isinstance(graph.timepoint_norm, np.ndarray):
+            timepoint_norm_tensor = torch.from_numpy(graph.timepoint_norm).float().to(device)
+        else:
+            timepoint_norm_tensor = graph.timepoint_norm.to(device)
+    
+    # Move graph data to device
+    x = graph.x.to(device)
+    edge_index = graph.edge_index.to(device)
+    edge_attr = graph.edge_attr.to(device) if hasattr(graph, 'edge_attr') and graph.edge_attr is not None else None
+    mask_device = mask.to(device)
+    
     if hasattr(graph, 'timepoint_norm') and hasattr(graph, 'edge_attr'):
         out = model(
-            graph.x.to(device),
-            graph.edge_index.to(device),
-            edge_attr=graph.edge_attr.to(device) if graph.edge_attr is not None else None,
-            timepoint_norm=graph.timepoint_norm.to(device) if hasattr(graph, 'timepoint_norm') else None,
+            x,
+            edge_index,
+            edge_attr=edge_attr,
+            timepoint_norm=timepoint_norm_tensor,
         )
     elif hasattr(graph, 'timepoint_norm'):
         out = model(
-            graph.x.to(device),
-            graph.edge_index.to(device),
+            x,
+            edge_index,
             edge_attr=None,
-            timepoint_norm=graph.timepoint_norm.to(device),
+            timepoint_norm=timepoint_norm_tensor,
         )
     else:
-        out = model(graph.x.to(device), graph.edge_index.to(device))
+        out = model(x, edge_index)
     
-    pred = out[mask].argmax(dim=1).cpu()
+    # Move predictions to CPU immediately to free GPU memory
+    pred = out[mask_device].argmax(dim=1).cpu()
     true = graph.celltype[mask].cpu()
     
     acc = accuracy_score(true.numpy(), pred.numpy())
     
+    # Clear GPU memory
+    del x, edge_index, out, mask_device
+    if edge_attr is not None:
+        del edge_attr
+    if timepoint_norm_tensor is not None:
+        del timepoint_norm_tensor
+    torch.cuda.empty_cache()
+    
     # classification metrics
     if celltype_names is not None:
+        # Get unique labels present in the data
+        unique_labels = np.unique(np.concatenate([true.numpy(), pred.numpy()]))
+        # Filter target_names to only include labels that are present
+        present_target_names = [celltype_names[i] for i in unique_labels if i < len(celltype_names)]
         report = classification_report(
             true.numpy(),
             pred.numpy(),
-            target_names=celltype_names,
+            labels=unique_labels,
+            target_names=present_target_names,
             output_dict=True,
             zero_division=0
         )
@@ -144,14 +248,16 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=1,
                         help='Batch size (usually 1 for single graph)')
-    parser.add_argument('--use_timepoint', action='store_true', default=True,
-                        help='Use timepoint as additional feature')
+    parser.add_argument('--use_timepoint', action='store_false', default=False,
+                        help='Do not use timepoint as additional feature')
     parser.add_argument('--use_edge_attr', action='store_true', default=True,
                         help='Use edge attributes (velocity-weighted)')
     parser.add_argument('--simple', action='store_true',
                         help='Use simplified model (no timepoint/edge_attr)')
     parser.add_argument('--output_dir', type=str, default='./checkpoints',
                         help='Directory to save model checkpoints')
+    parser.add_argument('--temporal_cutoff', type=float, default=11.0,
+                        help='Temporal cutoff for train/test split (E>=cutoff for train, E<cutoff for test)')
     
     args = parser.parse_args()
     
@@ -175,7 +281,7 @@ def main():
     print(f"Dropout: {args.dropout}")
     
     # create train/val/test split
-    graph = create_train_val_test_split(graph)
+    graph = create_train_val_test_split(graph, temporal_cutoff=args.temporal_cutoff)
     
     # create model
     if args.simple:
@@ -210,6 +316,9 @@ def main():
     best_epoch = 0
     
     for epoch in tqdm(range(args.epochs), desc="Training"):
+        # Clear cache at start of each epoch
+        torch.cuda.empty_cache()
+        
         #train
         train_loss, train_acc = train_epoch(model, graph, optimizer, criterion, device)
         
@@ -258,10 +367,15 @@ def main():
     print(f"  Accuracy: {test_acc:.4f}")
     print(f"\nClassification Report:")
     if hasattr(graph, 'celltype_names'):
+        # Get unique labels present in the test data
+        unique_labels = np.unique(np.concatenate([test_true.numpy(), test_pred.numpy()]))
+        # Filter target_names to only include labels that are present
+        present_target_names = [graph.celltype_names[i] for i in unique_labels if i < len(graph.celltype_names)]
         print(classification_report(
             test_true.numpy(),
             test_pred.numpy(),
-            target_names=graph.celltype_names,
+            labels=unique_labels,
+            target_names=present_target_names,
             zero_division=0
         ))
     else:

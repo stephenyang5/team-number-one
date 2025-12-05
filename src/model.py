@@ -47,7 +47,7 @@ class GraphTransformer(nn.Module):
         self.convs = nn.ModuleList()
         for _ in range(num_layers):
             nn_edge = nn.Sequential(
-                nn.Linear(1, hidden_channels),
+                nn.Linear(hidden_channels, hidden_channels),
                 nn.ReLU(),
                 nn.Linear(hidden_channels, hidden_channels)
             )
@@ -55,6 +55,7 @@ class GraphTransformer(nn.Module):
                 nn=nn_edge,
                 eps=0.0,
                 train_eps=True,
+                edge_dim=1,  # edge attributes are 1-dimensional
             )
 
             gps_conv = GPSConv(
@@ -62,7 +63,7 @@ class GraphTransformer(nn.Module):
                 conv=local_conv,
                 heads=heads,
                 dropout=dropout,
-                attn_type='transformer',  
+                attn_type='multihead',  
             )
             self.convs.append(gps_conv)
         
@@ -89,6 +90,11 @@ class GraphTransformer(nn.Module):
         output:
             logits: cell type predictions [n_nodes, out_channels]
         """
+        
+        # concatenate timepoint if using it
+        if self.use_timepoint and timepoint_norm is not None:
+            # timepoint_norm is [n_nodes], need to reshape to [n_nodes, 1] for concatenation
+            x = torch.cat([x, timepoint_norm.unsqueeze(1)], dim=1)
 
         # project input
         x = self.input_proj(x)
@@ -150,7 +156,7 @@ class GraphTransformerSimple(nn.Module):
                 conv=local_conv,
                 heads=heads,
                 dropout=dropout,
-                attn_type='transformer',
+                attn_type='multihead',
             )
             self.convs.append(gps_conv)
         

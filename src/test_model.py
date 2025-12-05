@@ -35,10 +35,10 @@ def test_model():
     )
     
     print(f"Graph created:")
-    print(f"  Nodes: {graph.x.shape[0]}")
-    print(f"  Edges: {graph.edge_index.shape[1]}")
-    print(f"  Node features: {graph.x.shape[1]}")
-    print(f"  Edge attributes: {graph.edge_attr.shape}")
+    print(f"Nodes: {graph.x.shape[0]}")
+    print(f"Edges: {graph.edge_index.shape[1]}")
+    print(f"Node features: {graph.x.shape[1]}")
+    print(f"Edge attributes: {graph.edge_attr.shape}")
     
     #test model
     print("\n" + "="*30)
@@ -52,7 +52,7 @@ def test_model():
         num_layers=2,
         heads=2,
         dropout=0.1,
-        use_timepoint=True,
+        use_timepoint=False,
         use_edge_attr=True,
     )
     
