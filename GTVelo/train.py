@@ -2,7 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
+import sys
 from tqdm import tqdm
+
+# Add parent directory to path to allow importing GTVelo
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from GTVelo.model_transformer import create_model
 
 """Training setup for one epoch"""
@@ -226,7 +230,7 @@ def train(data, model_config, train_config):
 if __name__ == "__main__":
     # Load prepared data
     print("Loading prepared data...")
-    data = torch.load('blood/blood_prepared.pt') #currently for blood dataset
+    data = torch.load('data/blood/blood_prepared.pt') #currently for blood dataset
     
     # Model configuration 
     model_config = {

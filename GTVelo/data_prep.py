@@ -9,8 +9,8 @@ Return: Training Data Dict
 """
 def prepare_dataset(dataset, temporal_cutoff=11.0):
     # Locate the files: 
-    graph_path=f"{dataset}/{dataset}_graph_velocity.pt"
-    adata_path=f"{dataset}/{dataset}_data_velocity.h5ad"
+    graph_path=f"data/{dataset}/{dataset}_graph_velocity.pt"
+    adata_path=f"data/{dataset}/{dataset}_velocity_data.h5ad"
 
     # Load graph
     print(f"\nLoading graph from {graph_path}")
@@ -25,11 +25,17 @@ def prepare_dataset(dataset, temporal_cutoff=11.0):
     edge_index = graph.edge_index  # [2, E]
     edge_attr = graph.edge_attr  # [E, 1] velocity-weighted
     
-    # Handle timepoint 
-    timepoint = torch.from_numpy(graph.timepoint).float()
+    # Handle timepoint - convert to tensor if needed
+    if isinstance(graph.timepoint, torch.Tensor):
+        timepoint = graph.timepoint.float()
+    else:
+        timepoint = torch.from_numpy(graph.timepoint).float()
     
-    # Handle celltype 
-    labels = torch.from_numpy(graph.celltype).long()
+    # Handle celltype - convert to tensor if needed
+    if isinstance(graph.celltype, torch.Tensor):
+        labels = graph.celltype.long()
+    else:
+        labels = torch.from_numpy(graph.celltype).long()
     
     # Add names
     celltype_names = graph.celltype_names
@@ -109,7 +115,7 @@ Params: dataset name and data dictionary
 Return: None
 """
 def save_prepared_data(dataset, data):
-    output_path = f"{dataset}/{dataset}_prepared.pt"
+    output_path = f"data/{dataset}/{dataset}_prepared.pt"
     torch.save(data, output_path)
     print(f"\n Saved prepared data to {output_path}")
 
