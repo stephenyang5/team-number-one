@@ -1,7 +1,3 @@
-"""
-Example script to visualize attention weights from a trained GTVelo model
-"""
-
 import torch
 import sys
 from pathlib import Path
@@ -58,7 +54,7 @@ if __name__ == "__main__":
         node_indices=node_indices,
         top_k_neighbors=25,
         top_k_nodes=100,
-        exclude_celltypes=['Primitive erythroid cells']  # Exclude primitive erythroid from neighbors
+        exclude_celltypes=['Primitive erythroid cells']
     )
     
     print("\n Done! Check the 'attention_viz/' directory for visualizations.")
