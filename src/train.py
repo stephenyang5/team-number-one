@@ -332,7 +332,7 @@ def evaluate(model, data, mask, device, celltype_names=None, split='val'):
         raise ValueError(f"Unknown split: {split}")
     mask_device = mask.to(device)
     
-    # Use mixed precision for evaluation to reduce memory
+    # mixed precision for evaluation to reduce memory
     with autocast(device_type='cuda'):
         if data['timepoint_norm'] is not None and edge_attr is not None:
             out = model(
@@ -598,4 +598,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

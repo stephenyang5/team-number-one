@@ -58,12 +58,14 @@ class GraphTransformer(nn.Module):
                 edge_dim=1,  # edge attributes are 1-dimensional
             )
 
+            # Use multihead attention - more stable than Performer
+            # For memory efficiency, we'll keep hidden_channels smaller
             gps_conv = GPSConv(
                 channels=hidden_channels,
                 conv=local_conv,
                 heads=heads,
                 dropout=dropout,
-                attn_type='multihead',  
+                attn_type='multihead',  # Multihead is more numerically stable
             )
             self.convs.append(gps_conv)
         
