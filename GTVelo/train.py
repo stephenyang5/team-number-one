@@ -226,7 +226,7 @@ def train(data, model_config, train_config):
 if __name__ == "__main__":
     # Load prepared data
     print("Loading prepared data...")
-    data = torch.load('blood/blood_prepared.pt') #currently for blood dataset
+    data = torch.load('neuron/neuron_prepared_velocity.pt') #change depencing on dataset
     
     # Model configuration 
     model_config = {
@@ -234,12 +234,12 @@ if __name__ == "__main__":
         'hid_dim': 128,  
         'n_layers': 3,  
         'heads': 4,    
-        'dropout': 0.3,    
+        'dropout': 0.2,    #prev 0.3
     }
     
     # Training configuration
     train_config = {
-        'lr': 5e-4,  
+        'lr': 1e-3,  #prev 1e^-4
         'weight_decay': 1e-4,
         'epochs': 200,
         'patience': 50, 

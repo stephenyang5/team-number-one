@@ -5,6 +5,10 @@ import numpy as np
 import scanpy as sc
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score, f1_score, classification_report
 import seaborn as sns
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
 from sklearn.linear_model import LogisticRegression
@@ -23,7 +27,7 @@ def load_model_and_data(checkpoint_path, data_path):
     data = torch.load(data_path)
     
     # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path)
     
     # Create model
     model = create_model(
@@ -147,6 +151,172 @@ def evaluate_logistic_regression(data):
     
     return results
 
+
+"""
+Purpose: KNN baseline (gold standard for single-cell)
+Params: Data, n_neighbors
+Return: Metric evaluation results
+"""
+def evaluate_knn(data, n_neighbors=15):
+    
+    print(f"\nEVALUATING KNN (k={n_neighbors})")
+    print("-" * 50)
+    
+    # Get data
+    X = data['X'].numpy()
+    labels = data['labels'].numpy()
+    train_mask = data['train_mask'].numpy()
+    test_mask = data['test_mask'].numpy()
+    
+    # Train KNN
+    print(f"Training KNN with {n_neighbors} neighbors...")
+    clf = KNeighborsClassifier(n_neighbors=n_neighbors, n_jobs=-1)
+    clf.fit(X[train_mask], labels[train_mask])
+    
+    # Predict
+    test_preds = clf.predict(X[test_mask])
+    test_probs = clf.predict_proba(X[test_mask])
+    test_labels = labels[test_mask]
+    
+    # Metrics
+    accuracy = accuracy_score(test_labels, test_preds)
+    f1_macro = f1_score(test_labels, test_preds, average='macro')
+    f1_weighted = f1_score(test_labels, test_preds, average='weighted')
+    
+    print(f"\nOverall Performance:")
+    print(f"\tAccuracy: {accuracy:.4f}")
+    print(f"\tF1 (macro): {f1_macro:.4f}")
+    print(f"\tF1 (weighted): {f1_weighted:.4f}")
+    
+    # Per-class metrics
+    print(f"\nPer-class Performance:")
+    for i, name in enumerate(data['celltype_names']):
+        class_mask = test_labels == i
+        if class_mask.sum() > 0:
+            class_acc = (test_preds[class_mask] == test_labels[class_mask]).mean()
+            n_samples = class_mask.sum()
+            print(f"\t{name:30} Acc: {class_acc:.4f} ({n_samples:4d} cells)")
+    
+    # Results dict
+    results = {
+        'method': f'KNN (k={n_neighbors})',
+        'accuracy': accuracy,
+        'f1_macro': f1_macro,
+        'f1_weighted': f1_weighted,
+        'predictions': test_preds,
+        'probabilities': test_probs,
+        'labels': test_labels
+    }
+    
+    return results
+
+
+"""
+Purpose: Random Forest baseline (robust non-linear classifier)
+Params: Data, n_estimators, max_depth
+Return: Metric evaluation results
+"""
+def evaluate_random_forest(data, n_estimators=100, max_depth=None):
+    
+    print(f"\nEVALUATING RANDOM FOREST (trees={n_estimators})")
+    print("-" * 50)
+    
+    # Get data
+    X = data['X'].numpy()
+    labels = data['labels'].numpy()
+    train_mask = data['train_mask'].numpy()
+    test_mask = data['test_mask'].numpy()
+    
+    # Train Random Forest
+    print(f"Training Random Forest with {n_estimators} trees...")
+    clf = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        random_state=92,
+        n_jobs=-1,
+        class_weight='balanced'  # Handle class imbalance
+    )
+    clf.fit(X[train_mask], labels[train_mask])
+    
+    # Predict
+    test_preds = clf.predict(X[test_mask])
+    test_probs = clf.predict_proba(X[test_mask])
+    test_labels = labels[test_mask]
+    
+    # Metrics
+    accuracy = accuracy_score(test_labels, test_preds)
+    f1_macro = f1_score(test_labels, test_preds, average='macro')
+    f1_weighted = f1_score(test_labels, test_preds, average='weighted')
+    
+    print(f"\nOverall Performance:")
+    print(f"\tAccuracy: {accuracy:.4f}")
+    print(f"\tF1 (macro): {f1_macro:.4f}")
+    print(f"\tF1 (weighted): {f1_weighted:.4f}")
+    
+    # Feature importance (top 10 PCs)
+    importances = clf.feature_importances_
+    top_features = np.argsort(importances)[::-1][:10]
+    print(f"\nTop 10 Important Features (PCs):")
+    for i, feat in enumerate(top_features, 1):
+        print(f"\t{i}. PC{feat}: {importances[feat]:.4f}")
+    
+    # Per-class metrics
+    print(f"\nPer-class Performance:")
+    for i, name in enumerate(data['celltype_names']):
+        class_mask = test_labels == i
+        if class_mask.sum() > 0:
+            class_acc = (test_preds[class_mask] == test_labels[class_mask]).mean()
+            n_samples = class_mask.sum()
+            print(f"\t{name:30} Acc: {class_acc:.4f} ({n_samples:4d} cells)")
+    
+    # Results dict
+    results = {
+        'method': 'Random Forest',
+        'accuracy': accuracy,
+        'f1_macro': f1_macro,
+        'f1_weighted': f1_weighted,
+        'predictions': test_preds,
+        'probabilities': test_probs,
+        'labels': test_labels,
+        'feature_importances': importances
+    }
+    
+    return results
+
+"""
+Purpose: Run all baseline methods
+Params: Data
+Return: List of all results
+"""
+def evaluate_all_baselines(data):
+    
+    print("\n" + "="*70)
+    print("EVALUATING ALL BASELINE METHODS")
+    print("="*70)
+    
+    results_list = []
+    
+    
+    # KNN
+    try:
+        knn_results = evaluate_knn(data, n_neighbors=15)
+        results_list.append(knn_results)
+    except Exception as e:
+        print(f"KNN failed: {e}")
+        results_list.append(None)
+    
+    # Random Forest
+    try:
+        rf_results = evaluate_random_forest(data, n_estimators=100)
+        results_list.append(rf_results)
+    except Exception as e:
+        print(f"Random Forest failed: {e}")
+        results_list.append(None)
+    
+    return results_list
+
+
+
 """
 Purpose: Confusion Matrix
 Params: results, celltype labels
@@ -242,66 +412,119 @@ def compare_methods(results_list, save_path=None):
     
     return df
 
+    """
+Purpose: Plot feature importance from Random Forest
+Params: RF results, save path
+Return: None
+"""
+def plot_feature_importance(rf_results, n_features=20, save_path=None):
+    
+    if 'feature_importances' not in rf_results:
+        print("No feature importances found in results")
+        return
+    
+    importances = rf_results['feature_importances']
+    indices = np.argsort(importances)[::-1][:n_features]
+    
+    plt.figure(figsize=(10, 6))
+    plt.bar(range(n_features), importances[indices])
+    plt.xlabel('Principal Component')
+    plt.ylabel('Importance')
+    plt.title('Random Forest Feature Importance (Top PCs)')
+    plt.xticks(range(n_features), [f'PC{i}' for i in indices], rotation=45)
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved feature importance plot to {save_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
 """Main script"""
 def main():
-    # Paths (manually change for different datasets!!!)
-    checkpoint_path = 'checkpoints/gtvelo_best.pt'
-    data_path = 'blood/blood_prepared.pt'
-    adata_path = 'blood/blood_data.h5ad'
-    results_dir = Path('results')
-    results_dir.mkdir(exist_ok=True)
+    # # Paths (manually change for different datasets!!!)
+    # checkpoint_path = 'checkpoints/gtvelo_best.pt'
+    # data_path = 'mouse_ethyroid/mouse_ethyroid_prepared_swap.pt'
+    # adata_path = 'mouse_ethyroid/mouse_ethyroid_data.h5ad'
+    # results_dir = Path('results')
+    # results_dir.mkdir(exist_ok=True)
     
-    # Load model and data
-    model, data, checkpoint = load_model_and_data(checkpoint_path, data_path)
+    # # Load model and data
+    # model, data, checkpoint = load_model_and_data(checkpoint_path, data_path)
     
-    # Evaluate GTVelo
-    gtvelo_results = evaluate_gtvelo(model, data)
+    # # Evaluate GTVelo
+    # print("\n" + "-"*50)
+    # print("EVALUATING GTVELO")
+    # gtvelo_results = evaluate_gtvelo(model, data)
     
-    # Plot GTVelo confusion matrix
-    plot_confusion_matrix(
-        gtvelo_results, 
-        data['celltype_names'],
-        save_path=results_dir / 'gtvelo_confusion_matrix.png'
-    )
+    # # Evaluate all baselines
+    # print("\n" + "-"*50)
+    # print("EVALUATING BASELINE METHODS")
     
-    # Evaluate Logistic Regression baseline
-    lr_results = evaluate_logistic_regression(data)
+    # lr_results = evaluate_logistic_regression(data)
+    # knn_results = evaluate_knn(data, n_neighbors=15)
+    # rf_results = evaluate_random_forest(data, n_estimators=100)
     
-    plot_confusion_matrix(
-        lr_results,
-        data['celltype_names'],
-        save_path=results_dir / 'logistic_regression_confusion_matrix.png'
-    )
+    # # Collect all results
+    # results_list = [gtvelo_results, lr_results, knn_results, rf_results]
     
-    # Compare methods
-    results_list = [gtvelo_results, lr_results]
-    comparison_df = compare_methods(
-        results_list,
-        save_path=results_dir / 'method_comparison.csv'
-    )
+    # # Plot confusion matrices for all methods
+    # for result in results_list:
+    #     if result is not None:
+    #         method_name = result['method'].replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
+    #         plot_confusion_matrix(
+    #             result,
+    #             data['celltype_names'],
+    #             save_path=results_dir / f'{method_name}_confusion_matrix.png'
+    #         )
     
-    # Print classification reports
-    print("CLASSIFICATION REPORTS")
+    # # Plot Random Forest feature importance
+    # if rf_results is not None:
+    #     plot_feature_importance(
+    #         rf_results,
+    #         n_features=20,
+    #         save_path=results_dir / 'random_forest_feature_importance.png'
+    #     )
     
-    for result in results_list:
-        if result is not None:
-            print(f"\n{result['method']}:")
-            print(classification_report(
-                result['labels'], 
-                result['predictions'],
-                target_names=data['celltype_names'],
-                digits=4
-            ))
+    # # Compare all methods
+    # comparison_df = compare_methods(
+    #     results_list,
+    #     save_path=results_dir / 'method_comparison.csv'
+    # )
     
-    print("EVALUATION COMPLETE!")
-    print(f"\nResults saved to: {results_dir}/")
+    # # Print classification reports
+    # print("\n" + "="*70)
+    # print("CLASSIFICATION REPORTS")
     
-    # Summary
-    print(f"\nSUMMARY:")
-    print(f"\tGTVelo Accuracy: {gtvelo_results['accuracy']:.4f}")
-    print(f"\tBaseline (LR): {lr_results['accuracy']:.4f}")
-    print(f"\tImprovement: {(gtvelo_results['accuracy'] - lr_results['accuracy'])*100:+.2f}%")
-
-
+    # for result in results_list:
+    #     if result is not None:
+    #         print(f"\n{result['method']}:")
+    #         print(classification_report(
+    #             result['labels'],
+    #             result['predictions'],
+    #             target_names=data['celltype_names'],
+    #             digits=4
+    #         ))
+    
+    # print("\n" + "="*70)
+    # print("EVALUATION COMPLETE!")
+    # print("="*70)
+    # print(f"\nResults saved to: {results_dir}/")
+    
+    # # Summary comparison
+    # print(f"\nSUMMARY:")
+    # print(f"\t{'Method':<25} {'Accuracy':<10} {'F1 (macro)':<12} {'F1 (weighted)':<12}")
+    # print(f"\t{'-'*60}")
+    # for result in results_list:
+    #     if result is not None:
+    #         print(f"\t{result['method']:<25} {result['accuracy']:<10.4f} {result['f1_macro']:<12.4f} {result['f1_weighted']:<12.4f}")
+    
+    # # Best method
+    # best_method = max(results_list, key=lambda x: x['accuracy'] if x else 0)
+    # print(f"\n\t🏆 Best method: {best_method['method']} ({best_method['accuracy']:.4f})")
+    print("running evaluate.py")
 if __name__ == "__main__":
     main()
