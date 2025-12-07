@@ -2,7 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
+import sys
 from tqdm import tqdm
+
+# Add parent directory to path to allow importing GTVelo
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from GTVelo.model_transformer import create_model
 
 """Training setup for one epoch"""
