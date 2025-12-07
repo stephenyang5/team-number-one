@@ -1,16 +1,17 @@
 import torch
 import numpy as np
 import scanpy as sc
+import pandas as pd
 
 """
 Purpose: Load velocity-weighted graph and prepare for temporal holdout training
 Params: dataset name and temopral_cutoff
 Return: Training Data Dict 
 """
-def prepare_dataset(dataset, temporal_cutoff=11.0):
+def prepare_dataset(dataset, swap=False, temporal_cutoff=11.0):
     # Locate the files: 
-    graph_path=f"data/{dataset}/{dataset}_graph_velocity.pt"
-    adata_path=f"data/{dataset}/{dataset}_velocity_data.h5ad"
+    graph_path=f"{dataset}/{dataset}_graph.pt"
+    adata_path=f"{dataset}/{dataset}_data.h5ad"
 
     # Load graph
     print(f"\nLoading graph from {graph_path}")
@@ -25,18 +26,26 @@ def prepare_dataset(dataset, temporal_cutoff=11.0):
     edge_index = graph.edge_index  # [2, E]
     edge_attr = graph.edge_attr  # [E, 1] velocity-weighted
     
-    # Handle timepoint - convert to tensor if needed
-    if isinstance(graph.timepoint, torch.Tensor):
-        timepoint = graph.timepoint.float()
+    # Handle timepoint 
+    tp = graph.timepoint
+
+    if isinstance(tp, torch.Tensor):
+        timepoint = tp.float()
+    elif isinstance(tp, np.ndarray):
+        timepoint = torch.from_numpy(tp).float()
+    elif isinstance(tp, pd.Series):
+        timepoint = torch.from_numpy(tp.to_numpy()).float()
     else:
-        timepoint = torch.from_numpy(graph.timepoint).float()
-    
-    # Handle celltype - convert to tensor if needed
-    if isinstance(graph.celltype, torch.Tensor):
-        labels = graph.celltype.long()
+        # fallback (list, scalar, etc.)
+        timepoint = torch.tensor(tp, dtype=torch.float32)
+
+    # Handle celltype 
+    celltype = graph.celltype
+    if isinstance(celltype, torch.Tensor):
+        labels = celltype.long()
     else:
-        labels = torch.from_numpy(graph.celltype).long()
-    
+        labels = torch.as_tensor(celltype, dtype=torch.long)
+
     # Add names
     celltype_names = graph.celltype_names
     
@@ -54,9 +63,9 @@ def prepare_dataset(dataset, temporal_cutoff=11.0):
     
     # Create temporal split
     print(f"\n Temporal cutoff = E{temporal_cutoff})")
-    
-    train_mask = timepoint >= temporal_cutoff
-    test_mask = timepoint < temporal_cutoff
+       
+    test_mask = timepoint >= temporal_cutoff
+    train_mask = timepoint < temporal_cutoff #train on early test on late
     
     # Validation: use middle timepoint from training set
     train_timepoints = timepoint[train_mask].unique()
@@ -105,7 +114,7 @@ def prepare_dataset(dataset, temporal_cutoff=11.0):
         'celltype_names': celltype_names,
         'temporal_cutoff': temporal_cutoff,
     }
-    
+    save_prepared_data(dataset, data, swap)  # change for dataset type
     return data
 
 
@@ -114,8 +123,9 @@ Purpose: Save prepared dataset
 Params: dataset name and data dictionary
 Return: None
 """
-def save_prepared_data(dataset, data):
-    output_path = f"data/{dataset}/{dataset}_prepared.pt"
+def save_prepared_data(dataset, data, swap=False):
+
+    output_path = f"{dataset}/{dataset}_prepared.pt"
     torch.save(data, output_path)
     print(f"\n Saved prepared data to {output_path}")
 
@@ -123,9 +133,8 @@ def save_prepared_data(dataset, data):
 if __name__ == "__main__":
     # Prepare data with appropiate cutoff
     data = prepare_dataset(
-        "blood",
-        temporal_cutoff=11.0  # change for dataset type
+        "mouse_ethyroid",
+        temporal_cutoff=8.0,  # change for dataset type
     )
-    save_prepared_data('blood', data)
     
     print("DATA PREP DONE")
